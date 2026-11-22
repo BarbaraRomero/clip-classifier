@@ -24,3 +24,16 @@ python3 -m http.server 8000
 4. After a minute the app will be live at `https://<your-username>.github.io/<repo-name>/`.
 
 The first visit downloads the model (~150 MB). After that the browser caches it.
+
+## Game modes
+
+- **Big Brain** compares the image with 1,437 things: ImageNet-1k (the cleaned class names CLIP's researchers used, from [open_clip](https://github.com/mlfoundations/open_clip)), the [Open Images](https://storage.googleapis.com/openimages/web/index.html) object classes, and a few extras such as "baby" and "selfie". The text side of these is precomputed into `embeddings.bin` (labels in `labels.json`), so the browser only has to process the image.
+- **My Options** lets students write their own descriptions, which CLIP compares the image with live.
+
+### Changing the Big Brain list
+
+Edit `tools/labels.json`, then rebuild the embeddings:
+
+```bash
+cd tools && npm install && node build_embeddings.mjs
+```

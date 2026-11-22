@@ -133,8 +133,12 @@
   .presets { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   .presets button { font-size: .6rem; padding: 8px 10px; }
   .presets button.active { background: var(--pink); color: #fff; }
+  details summary { font-family: var(--pixel); font-size: .6rem; color: var(--cyan); cursor: pointer; margin: 8px 0; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  #label-list { max-height: 240px; overflow-y: auto; border: 2px solid var(--hot); padding: 10px; background: #12031a; font-size: 1.05rem; }
+  #custom-panel h2 { margin-top: 8px; }
   footer { text-align: center; font-family: var(--pixel); font-size: .55rem; color: var(--muted); margin-top: 24px; line-height: 2; }
-  footer .credits { display: inline-block; margin-top: 12px; color: var(--bubblegum); text-shadow: 0 0 8px var(--pink); }
+  footer .credits { display: inline-block; margin-top: 12px; font-family: var(--term); font-size: 1.5rem; line-height: 1.2; color: var(--bubblegum); text-shadow: 0 0 8px var(--pink); }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -171,10 +175,25 @@
   </div>
 
   <section class="card">
+    <h2>🎮 SELECT GAME MODE</h2>
+    <div class="presets" id="modes">
+      <button class="ghost active" data-mode="big">🧠 BIG BRAIN: <span class="label-count">1,437</span> THINGS</button>
+      <button class="ghost" data-mode="custom">✎ MY OPTIONS</button>
+    </div>
+    <div id="big-panel">
+      <p class="hint">CLIP compares your image with <span class="label-count">1,437</span> things from <strong>ImageNet</strong> and <strong>Open Images</strong>, two famous lists that many image AIs on Hugging Face learned from, and shows its top 10 guesses.</p>
+      <details>
+        <summary>▶ SEE THE FULL LIST</summary>
+        <p id="label-list" class="hint"></p>
+      </details>
+    </div>
+    <div id="custom-panel" hidden>
     <h2>✎ DESCRIPTIONS: CHOOSE YOUR OPTIONS</h2>
     <p class="hint">CLIP doesn't have a fixed list of things it knows. It compares the image with each description below and picks the best match. Change them to play a new level!</p>
     <div class="presets">
       <span class="hint">LEVELS:</span>
+      <button class="ghost" data-preset="everything">EVERYTHING</button>
+      <button class="ghost" data-preset="people">PEOPLE</button>
       <button class="ghost" data-preset="animals">ANIMALS</button>
       <button class="ghost" data-preset="food">FOOD</button>
       <button class="ghost" data-preset="places">PLACES</button>
@@ -184,27 +203,49 @@
     <div class="row">
       <button id="add" class="ghost">+ ADD OPTION</button>
     </div>
+    </div>
   </section>
 
   <section class="card info">
     <h2>? HOW TO PLAY: HOW DOES IT WORK</h2>
     <p><strong>CLIP</strong> (Contrastive Language–Image Pre-training) was trained by OpenAI on about 400 million images paired with their captions from the internet. It learned to place images and text in the same "meaning space", so a photo of a dog ends up close to the words "a photo of a dog".</p>
     <p>When you press <em>START</em>, the image and every description are turned into lists of numbers called <em>embeddings</em>. The app measures how similar the image is to each description, then turns those similarity scores into percentages that add up to 100%.</p>
+    <p>In <em>BIG BRAIN</em> mode the 1,437 descriptions were turned into embeddings ahead of time and saved with the app, so only your image needs processing. That's why it can compare against so many things in about a second!</p>
     <p><strong>BONUS CHALLENGES:</strong> What happens if none of the descriptions fit? What if two descriptions are almost the same? Can you find an image that fools the AI? Remember: the score only compares the options you give it, so a high score means "best of these", not "definitely correct".</p>
     <p class="hint">🔒 Everything runs in your browser. Your image is never uploaded to a server.</p>
   </section>
 
   <footer>
     © 199X CLIP ARCADE • 1 CREDIT = 1 IMAGE • FREE PLAY<br>
-    <span class="credits">CREDITS: BY BÁRBARA ROMERO FERRÓN,<br>WITH THE INVALUABLE HELP OF CLAUDE ♥</span>
+    <span class="credits">Credits: by Bárbara Romero Ferrón,<br>with the invaluable help of Claude ♥</span>
   </footer>
 </main>
 
 <script type="module">
-import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
+import { AutoProcessor, AutoTokenizer, CLIPVisionModelWithProjection, CLIPTextModelWithProjection, RawImage, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
 env.allowLocalModels = false;
 
 const PRESETS = {
+  everything: [
+    ["Person", "a photo of a person"],
+    ["Baby", "a photo of a baby"],
+    ["Animal", "a photo of an animal"],
+    ["Food", "a photo of food"],
+    ["Vehicle", "a photo of a car, bike or other vehicle"],
+    ["Building", "a photo of a building"],
+    ["Nature", "a photo of a landscape or nature"],
+    ["Plant", "a photo of a plant or flower"],
+    ["Object", "a photo of an everyday object"],
+    ["Drawing", "a drawing or cartoon"],
+  ],
+  people: [
+    ["Baby", "a photo of a baby"],
+    ["Child", "a photo of a child"],
+    ["Parent with baby", "a photo of a parent holding a baby"],
+    ["Adult", "a photo of an adult"],
+    ["Elderly person", "a photo of an elderly person"],
+    ["Group", "a photo of a group of people"],
+  ],
   animals: [
     ["Dog", "a photo of a dog"],
     ["Cat", "a photo of a cat"],
@@ -240,7 +281,7 @@ const classifyBtn = $("classify"), statusEl = $("status"), resultsEl = $("result
 const descList = $("desc-list");
 const EMPTY_RESULTS = '<p class="hint">&gt; NO SCORES YET. LOAD AN IMAGE AND PRESS START!</p>';
 
-let classifier = null;
+let ready = false;
 let imageUrl = null;
 
 // ---------- Descriptions ----------
@@ -272,7 +313,7 @@ function getDescriptions() {
 }
 $("add").onclick = () => addDescription();
 document.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => loadPreset(b.dataset.preset)));
-loadPreset("animals");
+loadPreset("everything");
 
 // ---------- Image input ----------
 function setImage(file) {
@@ -303,18 +344,45 @@ $("clear").onclick = () => {
   resultsEl.innerHTML = EMPTY_RESULTS;
   updateButton();
 };
-function updateButton() { classifyBtn.disabled = !(classifier && imageUrl); }
+function updateButton() { classifyBtn.disabled = !(ready && imageUrl); }
+
+// ---------- Game mode ----------
+let mode = "big";
+document.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll("[data-mode]").forEach((x) => x.classList.toggle("active", x === b));
+  $("big-panel").hidden = mode !== "big";
+  $("custom-panel").hidden = mode !== "custom";
+}));
 
 // ---------- Model ----------
+const MODEL = "Xenova/clip-vit-base-patch32";
+const DIM = 512;
+let processor, vision;           // image half of CLIP (always needed)
+let tokenizer, textModel;        // text half (only for MY OPTIONS, loaded on demand)
+let bigLabels, bigEmbeds;        // precomputed BIG BRAIN list
+
+const progress = (what) => (p) => {
+  if (p.status === "progress" && p.file?.endsWith(".onnx")) {
+    statusEl.textContent = `> LOADING ${what}... ${Math.round(p.progress)}%`;
+  }
+};
+
 (async () => {
   try {
-    classifier = await pipeline("zero-shot-image-classification", "Xenova/clip-vit-base-patch32", {
-      progress_callback: (p) => {
-        if (p.status === "progress" && p.file?.endsWith(".onnx")) {
-          statusEl.textContent = `> LOADING AI BRAIN... ${Math.round(p.progress)}%`;
-        }
-      },
-    });
+    const [labels, buf] = await Promise.all([
+      fetch("labels.json").then((r) => r.json()),
+      fetch("embeddings.bin").then((r) => r.arrayBuffer()),
+    ]);
+    bigLabels = labels;
+    bigEmbeds = new Float32Array(buf);
+    const count = labels.length.toLocaleString("en-US");
+    document.querySelectorAll(".label-count").forEach((el) => (el.textContent = count));
+    $("label-list").textContent = [...labels].sort((a, b) => a.localeCompare(b)).join(" • ");
+
+    processor = await AutoProcessor.from_pretrained(MODEL);
+    vision = await CLIPVisionModelWithProjection.from_pretrained(MODEL, { progress_callback: progress("AI BRAIN") });
+    ready = true;
     statusEl.textContent = "> READY PLAYER 1! LOAD AN IMAGE AND PRESS START.";
     updateButton();
   } catch (err) {
@@ -323,31 +391,89 @@ function updateButton() { classifyBtn.disabled = !(classifier && imageUrl); }
   }
 })();
 
+function normalize(v) {
+  let n = 0;
+  for (let i = 0; i < v.length; i++) n += v[i] * v[i];
+  n = Math.sqrt(n);
+  return Float32Array.from(v, (x) => x / n);
+}
+
+async function embedImage(url) {
+  const image = await RawImage.read(url);
+  const { image_embeds } = await vision(await processor(image));
+  return normalize(image_embeds.data);
+}
+
+async function embedTexts(texts) {
+  if (!textModel) {
+    tokenizer = await AutoTokenizer.from_pretrained(MODEL);
+    textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL, { progress_callback: progress("WORD BRAIN") });
+  }
+  const { text_embeds } = await textModel(tokenizer(texts, { padding: true, truncation: true }));
+  const out = new Float32Array(texts.length * DIM);
+  for (let i = 0; i < texts.length; i++) out.set(normalize(text_embeds.data.subarray(i * DIM, (i + 1) * DIM)), i * DIM);
+  return out;
+}
+
+// Cosine similarity × 100 (CLIP's temperature), then softmax → percentages.
+function score(imgVec, textVecs, n) {
+  const logits = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let j = 0; j < DIM; j++) s += textVecs[i * DIM + j] * imgVec[j];
+    logits[i] = 100 * s;
+  }
+  const max = Math.max(...logits);
+  const exps = Array.from(logits, (l) => Math.exp(l - max));
+  const total = exps.reduce((a, b) => a + b, 0);
+  return exps.map((e) => e / total);
+}
+
+function showResults(items, note) {
+  resultsEl.innerHTML = "";
+  items.forEach((r, i) => {
+    const pct = (r.score * 100).toFixed(1);
+    const el = document.createElement("div");
+    el.className = "result" + (i === 0 ? " top" : "");
+    el.innerHTML = `
+      <div class="result-head"><span class="n"></span><span>${pct}%</span></div>
+      <div class="result-desc"></div>
+      <div class="bar"><span></span></div>`;
+    el.querySelector(".n").textContent = (i === 0 ? "👑 1UP " : `${i + 1}. `) + r.name.toUpperCase();
+    const desc = el.querySelector(".result-desc");
+    if (r.text) desc.textContent = r.text; else desc.remove();
+    resultsEl.appendChild(el);
+    requestAnimationFrame(() => (el.querySelector(".bar > span").style.width = pct + "%"));
+  });
+  const p = document.createElement("p");
+  p.className = "hint";
+  p.textContent = note;
+  resultsEl.appendChild(p);
+}
+
 // ---------- Classify ----------
 classifyBtn.onclick = async () => {
-  const descs = getDescriptions();
-  if (descs.length < 2) { statusEl.textContent = "> NEED AT LEAST 2 OPTIONS TO PLAY!"; return; }
+  let descs;
+  if (mode === "custom") {
+    descs = getDescriptions();
+    if (descs.length < 2) { statusEl.textContent = "> NEED AT LEAST 2 OPTIONS TO PLAY!"; return; }
+  }
   classifyBtn.disabled = true;
   statusEl.textContent = "> THINKING...";
   try {
-    const out = await classifier(imageUrl, descs.map((d) => d.text), { hypothesis_template: "{}" });
-    const byText = Object.fromEntries(descs.map((d) => [d.text, d]));
-    resultsEl.innerHTML = "";
-    out.sort((a, b) => b.score - a.score).forEach((r, i) => {
-      const d = byText[r.label] || { name: r.label, text: r.label };
-      const pct = (r.score * 100).toFixed(1);
-      const el = document.createElement("div");
-      el.className = "result" + (i === 0 ? " top" : "");
-      el.innerHTML = `
-        <div class="result-head"><span class="n"></span><span>${pct}%</span></div>
-        <div class="result-desc"></div>
-        <div class="bar"><span></span></div>`;
-      el.querySelector(".n").textContent = (i === 0 ? "👑 1UP " : `${i + 1}. `) + d.name.toUpperCase();
-      el.querySelector(".result-desc").textContent = d.text;
-      resultsEl.appendChild(el);
-      requestAnimationFrame(() => (el.querySelector(".bar > span").style.width = pct + "%"));
-    });
-    statusEl.textContent = "> STAGE CLEAR! CHANGE THE OPTIONS AND PLAY AGAIN.";
+    const img = await embedImage(imageUrl);
+    if (mode === "big") {
+      const probs = score(img, bigEmbeds, bigLabels.length);
+      const top = probs.map((s, i) => ({ score: s, name: bigLabels[i] }))
+        .sort((a, b) => b.score - a.score).slice(0, 10);
+      showResults(top, `⚠ TOP 10 OUT OF ${bigLabels.length.toLocaleString("en-US")} THINGS. CLIP can only guess things on its list. If it's wrong, try MY OPTIONS mode and write your own!`);
+    } else {
+      const probs = score(img, await embedTexts(descs.map((d) => d.text)), descs.length);
+      const all = descs.map((d, i) => ({ score: probs[i], name: d.name, text: d.text }))
+        .sort((a, b) => b.score - a.score);
+      showResults(all, "⚠ CLIP can only pick from the options in DESCRIPTIONS. If none of them fit, it still picks the closest one. Try another level or add your own option!");
+    }
+    statusEl.textContent = "> STAGE CLEAR! TRY ANOTHER IMAGE OR GAME MODE.";
   } catch (err) {
     console.error(err);
     statusEl.textContent = "> GAME OVER: SOMETHING WENT WRONG. TRY AGAIN.";
