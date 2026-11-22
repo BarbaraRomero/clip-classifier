@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLIP Image Classifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1a0620;
+    --bg-2: #2b0a33;
+    --pink: #ff2fa0;
+    --hot: #ff6ec7;
+    --bubblegum: #ffb3e6;
+    --cyan: #3ff6ff;
+    --yellow: #ffe94a;
+    --text: #ffe6f6;
+    --muted: #d58ec0;
+    --pixel: "Press Start 2P", monospace;
+    --term: "VT323", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; color: var(--text); font: 22px/1.25 var(--term);
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at top, #4a0f52 0%, transparent 60%),
+      linear-gradient(transparent 60%, rgba(255,47,160,.18)),
+      var(--bg);
+  }
+  /* neon grid floor */
+  body::before {
+    content: ""; position: fixed; left: -50%; right: -50%; bottom: 0; height: 45vh; z-index: -1;
+    background-image:
+      linear-gradient(var(--pink) 2px, transparent 2px),
+      linear-gradient(90deg, var(--pink) 2px, transparent 2px);
+    background-size: 60px 60px;
+    transform: perspective(300px) rotateX(60deg); transform-origin: bottom;
+    opacity: .28;
+    mask-image: linear-gradient(transparent, #000 70%);
+    -webkit-mask-image: linear-gradient(transparent, #000 70%);
+  }
+  /* CRT scanlines */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0 2px, transparent 2px 4px);
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+
+  header { text-align: center; margin-bottom: 28px; }
+  h1 {
+    font-family: var(--pixel); font-size: clamp(1.3rem, 5vw, 2.4rem); line-height: 1.4; margin: 0 0 14px;
+    color: var(--bubblegum);
+    text-shadow: 0 0 6px var(--pink), 0 0 18px var(--pink), 4px 4px 0 #6b0a4a;
+    animation: flicker 4s infinite;
+  }
+  @keyframes flicker { 0%,92%,100% { opacity: 1 } 93% { opacity: .6 } 95% { opacity: 1 } 97% { opacity: .75 } }
+  .sub { color: var(--muted); margin: 0; font-size: 1.3rem; }
+  .sub strong { color: var(--cyan); }
+  .blink { font-family: var(--pixel); font-size: .75rem; color: var(--yellow); margin-top: 14px;
+    animation: blink 1s steps(1) infinite; letter-spacing: 2px; }
+  @keyframes blink { 50% { opacity: 0 } }
+
+  h2 {
+    font-family: var(--pixel); font-size: .85rem; line-height: 1.6; margin: 0 0 16px;
+    color: var(--yellow); text-shadow: 2px 2px 0 #7a1a5a; letter-spacing: 1px;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: linear-gradient(180deg, rgba(60,10,70,.92), rgba(34,6,42,.92));
+    border: 4px solid var(--pink); border-radius: 0; padding: 20px; margin-bottom: 20px;
+    box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px #7a1a5a, 0 0 24px rgba(255,47,160,.55), inset 0 0 30px rgba(255,47,160,.15);
+  }
+  #drop {
+    border: 3px dashed var(--hot); min-height: 260px;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    cursor: pointer; overflow: hidden; color: var(--bubblegum); padding: 12px;
+    background: rgba(255,47,160,.06);
+  }
+  #drop.over, #drop:focus-visible { border-color: var(--cyan); background: rgba(63,246,255,.08); outline: none; }
+  #drop-text { font-family: var(--pixel); font-size: .7rem; line-height: 2; }
+  #preview { max-width: 100%; max-height: 360px; display: none; image-rendering: auto; border: 3px solid var(--cyan); }
+
+  button {
+    font-family: var(--pixel); font-size: .7rem; letter-spacing: 1px;
+    background: var(--pink); color: #fff; border: 0; padding: 12px 16px; cursor: pointer;
+    box-shadow: 4px 4px 0 #6b0a4a, 0 0 12px rgba(255,47,160,.7);
+    text-shadow: 1px 1px 0 #6b0a4a;
+    transition: transform .05s;
+  }
+  button:hover:not(:disabled) { background: var(--hot); }
+  button:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 0 0 12px rgba(255,47,160,.7); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--bubblegum); border: 2px solid var(--hot); box-shadow: 3px 3px 0 #6b0a4a; }
+  button.ghost:hover { background: rgba(255,47,160,.2); }
+  #classify:not(:disabled) { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { box-shadow: 4px 4px 0 #6b0a4a, 0 0 26px var(--pink); } }
+
+  .row { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+  #status { color: var(--cyan); font-size: 1.2rem; margin-top: 12px; min-height: 1.5em; }
+
+  .result { margin-bottom: 16px; }
+  .result-head { display: flex; justify-content: space-between; gap: 8px; font-family: var(--pixel); font-size: .7rem; line-height: 1.6; }
+  .result-desc { color: var(--muted); font-size: 1.15rem; margin: 2px 0 6px; }
+  .bar { height: 18px; background: #12031a; border: 2px solid var(--hot); padding: 2px; }
+  .bar > span {
+    display: block; height: 100%; width: 0; transition: width .8s steps(20);
+    background: repeating-linear-gradient(90deg, var(--pink) 0 10px, var(--hot) 10px 12px);
+    box-shadow: 0 0 8px var(--pink);
+  }
+  .result.top .result-head { color: var(--yellow); text-shadow: 0 0 8px var(--yellow); }
+  .result.top .bar { border-color: var(--yellow); }
+  .result.top .bar > span { background: repeating-linear-gradient(90deg, var(--yellow) 0 10px, #ffb800 10px 12px); box-shadow: 0 0 10px var(--yellow); }
+
+  .desc-item { display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; margin-bottom: 10px; align-items: start; }
+  @media (max-width: 560px) { .desc-item { grid-template-columns: 1fr auto; } .desc-item textarea { grid-column: 1 / -1; grid-row: 2; } }
+  input[type=text], textarea {
+    width: 100%; padding: 6px 10px; border: 2px solid var(--hot); border-radius: 0;
+    background: #12031a; color: var(--bubblegum); font: 1.2rem var(--term);
+  }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 10px rgba(63,246,255,.5); }
+  input::placeholder, textarea::placeholder { color: #8a4d78; }
+  textarea { resize: vertical; min-height: 40px; }
+  .remove { padding: 10px 12px; background: transparent; color: var(--hot); border: 2px solid var(--hot); box-shadow: none; }
+  .hint { color: var(--muted); font-size: 1.15rem; }
+  .info p { margin: 0 0 12px; font-size: 1.2rem; }
+  .info strong { color: var(--cyan); }
+  .info em { color: var(--yellow); font-style: normal; }
+  .presets { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  .presets button { font-size: .6rem; padding: 8px 10px; }
+  .presets button.active { background: var(--pink); color: #fff; }
+  footer { text-align: center; font-family: var(--pixel); font-size: .55rem; color: var(--muted); margin-top: 24px; line-height: 2; }
+  footer .credits { display: inline-block; margin-top: 12px; color: var(--bubblegum); text-shadow: 0 0 8px var(--pink); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>★ PIXEL GUESSER ★</h1>
+    <p class="sub">Feed an image to <strong>CLIP</strong>, the AI brain, and watch it guess what it sees!</p>
+    <div class="blink">INSERT IMAGE TO START</div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <h2>▶ 1P: LOAD IMAGE</h2>
+      <div id="drop" tabindex="0">
+        <span id="drop-text">CLICK • DRAG • PASTE<br>AN IMAGE HERE</span>
+        <img id="preview" alt="Uploaded image preview">
+      </div>
+      <input type="file" id="file" accept="image/*" hidden>
+      <div class="row">
+        <button id="classify" disabled>▶ PRESS START</button>
+        <button id="clear" class="ghost">RESET</button>
+      </div>
+      <div id="status">&gt; LOADING AI BRAIN... (FIRST TIME ~1 MIN)</div>
+    </section>
+
+    <section class="card">
+      <h2>🏆 HIGH SCORES</h2>
+      <div id="results"><p class="hint">&gt; NO SCORES YET. LOAD AN IMAGE AND PRESS START!</p></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>✎ DESCRIPTIONS: CHOOSE YOUR OPTIONS</h2>
+    <p class="hint">CLIP doesn't have a fixed list of things it knows. It compares the image with each description below and picks the best match. Change them to play a new level!</p>
+    <div class="presets">
+      <span class="hint">LEVELS:</span>
+      <button class="ghost" data-preset="animals">ANIMALS</button>
+      <button class="ghost" data-preset="food">FOOD</button>
+      <button class="ghost" data-preset="places">PLACES</button>
+      <button class="ghost" data-preset="emotions">EMOTIONS</button>
+    </div>
+    <div id="desc-list"></div>
+    <div class="row">
+      <button id="add" class="ghost">+ ADD OPTION</button>
+    </div>
+  </section>
+
+  <section class="card info">
+    <h2>? HOW TO PLAY: HOW DOES IT WORK</h2>
+    <p><strong>CLIP</strong> (Contrastive Language–Image Pre-training) was trained by OpenAI on about 400 million images paired with their captions from the internet. It learned to place images and text in the same "meaning space", so a photo of a dog ends up close to the words "a photo of a dog".</p>
+    <p>When you press <em>START</em>, the image and every description are turned into lists of numbers called <em>embeddings</em>. The app measures how similar the image is to each description, then turns those similarity scores into percentages that add up to 100%.</p>
+    <p><strong>BONUS CHALLENGES:</strong> What happens if none of the descriptions fit? What if two descriptions are almost the same? Can you find an image that fools the AI? Remember: the score only compares the options you give it, so a high score means "best of these", not "definitely correct".</p>
+    <p class="hint">🔒 Everything runs in your browser. Your image is never uploaded to a server.</p>
+  </section>
+
+  <footer>
+    © 199X CLIP ARCADE • 1 CREDIT = 1 IMAGE • FREE PLAY<br>
+    <span class="credits">CREDITS: BY BÁRBARA ROMERO FERRÓN,<br>WITH THE INVALUABLE HELP OF CLAUDE ♥</span>
+  </footer>
+</main>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
+env.allowLocalModels = false;
+
+const PRESETS = {
+  animals: [
+    ["Dog", "a photo of a dog"],
+    ["Cat", "a photo of a cat"],
+    ["Bird", "a photo of a bird"],
+    ["Fish", "a photo of a fish"],
+    ["Horse", "a photo of a horse"],
+  ],
+  food: [
+    ["Pizza", "a photo of a pizza"],
+    ["Salad", "a photo of a salad"],
+    ["Cake", "a photo of a cake or dessert"],
+    ["Fruit", "a photo of fruit"],
+    ["Burger", "a photo of a hamburger"],
+  ],
+  places: [
+    ["Beach", "a photo of a beach"],
+    ["Mountain", "a photo of mountains"],
+    ["City", "a photo of a city street"],
+    ["Forest", "a photo of a forest"],
+    ["Classroom", "a photo of a classroom"],
+  ],
+  emotions: [
+    ["Happy", "a photo of a happy person smiling"],
+    ["Sad", "a photo of a sad person"],
+    ["Angry", "a photo of an angry person"],
+    ["Surprised", "a photo of a surprised person"],
+  ],
+};
+
+const $ = (id) => document.getElementById(id);
+const drop = $("drop"), fileInput = $("file"), preview = $("preview");
+const classifyBtn = $("classify"), statusEl = $("status"), resultsEl = $("results");
+const descList = $("desc-list");
+const EMPTY_RESULTS = '<p class="hint">&gt; NO SCORES YET. LOAD AN IMAGE AND PRESS START!</p>';
+
+let classifier = null;
+let imageUrl = null;
+
+// ---------- Descriptions ----------
+function addDescription(name = "", text = "") {
+  const item = document.createElement("div");
+  item.className = "desc-item";
+  item.innerHTML = `
+    <input type="text" class="d-name" placeholder="Label (e.g. Dog)">
+    <textarea class="d-text" rows="1" placeholder="Description CLIP will compare (e.g. a photo of a dog)"></textarea>
+    <button class="remove" title="Remove">✕</button>`;
+  item.querySelector(".d-name").value = name;
+  item.querySelector(".d-text").value = text;
+  item.querySelector(".remove").onclick = () => item.remove();
+  descList.appendChild(item);
+}
+function loadPreset(key) {
+  descList.innerHTML = "";
+  PRESETS[key].forEach(([n, t]) => addDescription(n, t));
+  document.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b.dataset.preset === key));
+}
+function getDescriptions() {
+  return [...descList.querySelectorAll(".desc-item")]
+    .map((el) => {
+      const name = el.querySelector(".d-name").value.trim();
+      const text = el.querySelector(".d-text").value.trim();
+      return { name: name || text, text: text || name };
+    })
+    .filter((d) => d.text);
+}
+$("add").onclick = () => addDescription();
+document.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => loadPreset(b.dataset.preset)));
+loadPreset("animals");
+
+// ---------- Image input ----------
+function setImage(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  if (imageUrl) URL.revokeObjectURL(imageUrl);
+  imageUrl = URL.createObjectURL(file);
+  preview.src = imageUrl;
+  preview.style.display = "block";
+  $("drop-text").style.display = "none";
+  updateButton();
+}
+drop.onclick = () => fileInput.click();
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); };
+fileInput.onchange = () => setImage(fileInput.files[0]);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setImage(e.dataTransfer.files[0]); };
+window.addEventListener("paste", (e) => {
+  const item = [...e.clipboardData.items].find((i) => i.type.startsWith("image/"));
+  if (item) setImage(item.getAsFile());
+});
+$("clear").onclick = () => {
+  if (imageUrl) URL.revokeObjectURL(imageUrl);
+  imageUrl = null;
+  preview.style.display = "none";
+  $("drop-text").style.display = "";
+  fileInput.value = "";
+  resultsEl.innerHTML = EMPTY_RESULTS;
+  updateButton();
+};
+function updateButton() { classifyBtn.disabled = !(classifier && imageUrl); }
+
+// ---------- Model ----------
+(async () => {
+  try {
+    classifier = await pipeline("zero-shot-image-classification", "Xenova/clip-vit-base-patch32", {
+      progress_callback: (p) => {
+        if (p.status === "progress" && p.file?.endsWith(".onnx")) {
+          statusEl.textContent = `> LOADING AI BRAIN... ${Math.round(p.progress)}%`;
+        }
+      },
+    });
+    statusEl.textContent = "> READY PLAYER 1! LOAD AN IMAGE AND PRESS START.";
+    updateButton();
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "> GAME OVER: COULDN'T LOAD THE AI. CHECK YOUR INTERNET AND RELOAD.";
+  }
+})();
+
+// ---------- Classify ----------
+classifyBtn.onclick = async () => {
+  const descs = getDescriptions();
+  if (descs.length < 2) { statusEl.textContent = "> NEED AT LEAST 2 OPTIONS TO PLAY!"; return; }
+  classifyBtn.disabled = true;
+  statusEl.textContent = "> THINKING...";
+  try {
+    const out = await classifier(imageUrl, descs.map((d) => d.text), { hypothesis_template: "{}" });
+    const byText = Object.fromEntries(descs.map((d) => [d.text, d]));
+    resultsEl.innerHTML = "";
+    out.sort((a, b) => b.score - a.score).forEach((r, i) => {
+      const d = byText[r.label] || { name: r.label, text: r.label };
+      const pct = (r.score * 100).toFixed(1);
+      const el = document.createElement("div");
+      el.className = "result" + (i === 0 ? " top" : "");
+      el.innerHTML = `
+        <div class="result-head"><span class="n"></span><span>${pct}%</span></div>
+        <div class="result-desc"></div>
+        <div class="bar"><span></span></div>`;
+      el.querySelector(".n").textContent = (i === 0 ? "👑 1UP " : `${i + 1}. `) + d.name.toUpperCase();
+      el.querySelector(".result-desc").textContent = d.text;
+      resultsEl.appendChild(el);
+      requestAnimationFrame(() => (el.querySelector(".bar > span").style.width = pct + "%"));
+    });
+    statusEl.textContent = "> STAGE CLEAR! CHANGE THE OPTIONS AND PLAY AGAIN.";
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "> GAME OVER: SOMETHING WENT WRONG. TRY AGAIN.";
+  }
+  updateButton();
+};
+</script>
+</body>
+</html>
